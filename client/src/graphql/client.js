@@ -1,9 +1,12 @@
 import {
-  ApolloClient, ApolloLink, HttpLink, InMemoryCache
+  ApolloClient, ApolloLink, HttpLink, InMemoryCache, split
 } from 'apollo-boost';
+import { WebSocketLink } from 'apollo-link-ws';
+import { getMainDefinition } from 'apollo-utilities';
 import { getAccessToken } from '../auth';
 
 const httpUrl = 'http://localhost:9000/graphql';
+const wsUrl = 'ws://localhost:9000/graphql';
 
 const httpLink = ApolloLink.from([
   new ApolloLink((operation, forward) => {
@@ -16,9 +19,31 @@ const httpLink = ApolloLink.from([
   new HttpLink({uri: httpUrl})
 ]);
 
+const wsLink = new WebSocketLink({
+  uri: wsUrl,
+  options: {
+    lazy: true, // so that we only make websocket call no earlier than page load (only when we make subscription)
+    reconnect: true, // if websocket connection gets interupted, client will try to reconnect
+    // can be any shape
+    connectionParams: () => ({
+      // setting as method so getAccessToken() is called only when connection starts
+      // not as soon as page loads
+      // makes sure to always get latest access token
+      // otherwise could be called on page load where access token is null
+      accessToken: getAccessToken()
+    })
+  }
+});
+
+function isSubscription(operation) {
+  // this code can be inferred from graphql documentation, don't need to worry too much about this
+  const definition = getMainDefinition(operation.query);
+  return definition.kind === 'OperationDefinition' && definition.operation === 'subscription';
+}
+
 const client = new ApolloClient({
   cache: new InMemoryCache(),
-  link: httpLink,
+  link: split(isSubscription, wsLink, httpLink), // if isSubscription, use wsLink, otherwise httpLink
   defaultOptions: {query: {fetchPolicy: 'no-cache'}}
 });
 

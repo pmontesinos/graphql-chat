@@ -1,4 +1,5 @@
 const fs = require('fs');
+const http = require('http');
 const { ApolloServer } = require('apollo-server-express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
@@ -19,9 +20,14 @@ app.use(cors(), bodyParser.json(), expressJwt({
 const typeDefs = fs.readFileSync('./schema.graphql', {encoding: 'utf8'});
 const resolvers = require('./resolvers');
 
-function context({req}) {
+function context({req, connection}) {
   if (req && req.user) {
     return {userId: req.user.sub};
+  }
+  // for websockets
+  if (connection && connection.context && connection.context.accessToken) {
+    const decodedToken = jwt.verify(connection.context.accessToken, jwtSecret);
+    return {userId: decodedToken.sub};
   }
   return {};
 }
@@ -40,4 +46,6 @@ app.post('/login', (req, res) => {
   res.send({token});
 });
 
-app.listen(port, () => console.log(`Server started on port ${port}`));
+const httpServer = http.createServer(app);
+apolloServer.installSubscriptionHandlers(httpServer); // handles web sockets
+httpServer.listen(port, () => console.log(`Server started on port ${port}`));
